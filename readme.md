@@ -9,6 +9,8 @@
 edit the resulttxt in main.cpp
 
 build D:/project/HOG/t10k-images-bmp/t10k-images/result.txt
+
 1. copy createpath.py from tools directory to t10k-images
+
 2. run `python createpath.py` to build result.txt
 
