@@ -3,7 +3,9 @@
 生成test.jpg
 ![](http://i.imgur.com/8devBXP.jpg)
 
-对test.jpg进行预测
+对test.jpg进行s手写数字的预测
+
+
 ![](http://i.imgur.com/IWBUMBo.jpg)
 
 edit the resulttxt in main.cpp
