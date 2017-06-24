@@ -14,6 +14,8 @@ using namespace cv::ml;
 
 #define resulttxt "/Users/aamirjawaid/Documents/workspace/hand-write-digit-recognition-with-opencv/t10k-images/result.txt"
 
+static string modelFile = "/Users/aamirjawaid/Documents/workspace/hand-write-digit-recognition-with-opencv/ANN.xml";
+
 void buildImg()
 {
     BoxExtractor box;
@@ -68,7 +70,7 @@ int getNumberOfLines(const string csvPath) {
 void getDescriptors(const string csvPath, Mat &dataMatrix, Mat &resultMatrix) {
     int numberOfLines = getNumberOfLines(csvPath);
     dataMatrix = Mat::zeros(numberOfLines, 324, CV_32FC1);
-    resultMatrix = Mat::zeros(numberOfLines, 1, CV_32SC1);
+    resultMatrix = Mat::zeros(numberOfLines, 10, CV_32FC1);
     ifstream inputfile(csvPath);
     string current_line;
     
@@ -100,7 +102,7 @@ void getDescriptors(const string csvPath, Mat &dataMatrix, Mat &resultMatrix) {
             dataMatrix.at<float>(static_cast<int>(row), n) = *iter;
             n++;
         }
-        resultMatrix.at<int32_t>(static_cast<int>(row), 0) = result;
+        resultMatrix.at<float>(static_cast<int>(row), result) = 1.f;
         row++;
         cout << row << endl;
     }
@@ -179,8 +181,21 @@ void testTrain(Mat data_mat, Mat res_mat, double C, double gamma)
     Ptr<ml::TrainData> tData = TrainData::create(data_mat, SampleTypes::ROW_SAMPLE, res_mat);
     svm->train(tData);
     std::cout<<"saving... ... !!! \n "<<endl;
-    svm->save("/Users/aamirjawaid/Documents/workspace/hand-write-digit-recognition-with-opencv/HOG_SVM_DATA.xml");;
-    cout<<"HOG_SVM_DATA.xml is saved !!! \n exit train process"<<endl;
+    svm->save(modelFile);;
+    cout << modelFile << "is saved !!! \n exit train process"<<endl;
+}
+
+void testTrain(Mat data_mat, Mat res_mat) {
+    int networkInputSize = data_mat.cols;
+    int networkOutputSize = res_mat.cols;
+    cv::Ptr<cv::ml::ANN_MLP> mlp = cv::ml::ANN_MLP::create();
+    std::vector<int> layerSizes = { networkInputSize, data_mat.rows / (6 * (networkInputSize + networkOutputSize)), networkOutputSize };
+    mlp->setLayerSizes(layerSizes);
+    mlp->setActivationFunction(cv::ml::ANN_MLP::SIGMOID_SYM);
+    mlp->train(data_mat, cv::ml::ROW_SAMPLE, res_mat);
+    std::cout<<"saving... ... !!! \n "<<endl;
+    mlp->save(modelFile);;
+    cout << modelFile << "is saved !!! \n exit train process"<<endl;
 }
 
 Mat getMatFromImage(const string imagePath) {
@@ -201,7 +216,7 @@ int predict(Mat descriptor, Ptr<ml::SVM> svm) {
 int testPredict(Mat img)
 {
 //    char result[300];
-    Ptr<ml::SVM> svm = Algorithm::load<SVM>("/Users/aamirjawaid/Documents/workspace/hand-write-digit-recognition-with-opencv/HOG_SVM_DATA.xml");
+    Ptr<ml::SVM> svm = Algorithm::load<SVM>(modelFile);
     HOGDescriptor *hog=new HOGDescriptor(cvSize(28,28),cvSize(14,14),cvSize(7,7),cvSize(7,7),9);
     vector<float>descriptors;
     hog->compute(img, descriptors,Size(1,1), Size(0,0));
@@ -223,9 +238,15 @@ int testPredict(Mat img)
 //    cvReleaseImage(&test);
 //    cvReleaseImage(&trainTempImg);
 }
-void visualizeImages(const string csvPath) {
+
+void printMatrix(string filename, Mat matrix) {
     string folder = "/Users/aamirjawaid/Documents/workspace/hand-write-digit-recognition-with-opencv/images/";
-    
+    char fullfilepath[1024];
+    sprintf(fullfilepath, "%s%s", folder.c_str(), filename.c_str());
+    imwrite(filename, matrix);
+}
+
+void visualizeImages(const string csvPath) {
     ifstream inputfile(csvPath);
     string current_line;
     
@@ -254,17 +275,51 @@ void visualizeImages(const string csvPath) {
         double skew2 = getSkew(deskewedMatrix2);
         cv::Mat deskewedMatrix3 = deskew(deskewedMatrix2, skew2);
         char filename[1024];
-        sprintf(filename, "%s%d-e.jpg", folder.c_str(), numberOfSamples);
-        imwrite(filename, deskewedMatrix3);
+        sprintf(filename, "%d-e.jpg", numberOfSamples);
+        printMatrix(filename, deskewedMatrix3);
     }
 }
 
+void test(Mat data, Mat result, int firstIndex = 0) {
+    cv::Ptr<cv::ml::ANN_MLP> mlp = Algorithm::load<ANN_MLP>(modelFile);
+    int numberOfWrongGuesses = 0;
+    int numberOfRightGuesses = 0;
+    for (int i = firstIndex; i < data.rows; i++) {
+        cv::Mat output;
+        mlp->predict(data.row(i), output);
+        double max = -1;
+        int index[2];
+        minMaxIdx(output, NULL, &max, NULL, index);
+        double max2 = -1;
+        int index2[2];
+        minMaxIdx(result.row(i), NULL, &max2, NULL, index2);
+        cout << index[1] << " " << index2[1] << endl;
+        if (index[1] == index2[1]) {
+            numberOfRightGuesses++;
+        } else {
+            numberOfWrongGuesses++;
+            cout << output << endl;
+        }
+    }
+    
+    cout << "numberOfRightGuesses";
+    cout << numberOfRightGuesses << endl;
+
+    cout << "numberOfWrongGuesses";
+    cout << numberOfWrongGuesses << endl;
+    
+    float accuracy = static_cast<float>(numberOfRightGuesses) / (numberOfRightGuesses + numberOfWrongGuesses);
+    cout << "Accuracy " << accuracy << endl;
+}
+
 void runThroughTests() {
+    
     Mat allData;
     Mat res_mat;
     getDescriptors("/Users/aamirjawaid/Downloads/train.csv", allData, res_mat);
     
-    int trainingDataCount = allData.rows * 0.85f;
+    
+    int trainingDataCount = allData.rows * 0.80f;
     Mat trainingData;
     Mat trainResult;
     for (int i = 0; i < trainingDataCount; i++) {
@@ -288,29 +343,30 @@ void runThroughTests() {
 //    double Cs[] = { 0.01, 0.1, 1, 10, 100 };
 //    for (int j = 0; j < 5; j++) {
 //        for (int k = 0; k < 5; k++ ) {
-            testTrain(trainingData, trainResult, 10, 0.5);
-            cout << "Testing" << endl;
-            int numberOfWrongGuesses = 0;
-            int numberOfRightGuesses = 0;
-            Ptr<ml::SVM> svm = Algorithm::load<SVM>("/Users/aamirjawaid/Documents/workspace/hand-write-digit-recognition-with-opencv/HOG_SVM_DATA.xml");
-            for (int i = trainingDataCount; i < allData.rows; i++) {
-                int result = predict(allData.row(i), svm);
-                if (result == res_mat.at<int>(i)) {
-                    numberOfRightGuesses++;
-                } else {
-                    numberOfWrongGuesses++;
-                }
-            }
-            
-            cout << "numberOfRightGuesses";
-            cout << numberOfRightGuesses << endl;
-            
-            cout << "numberOfWrongGuesses";
-            cout << numberOfWrongGuesses << endl;
-            
-            float accuracy = static_cast<float>(numberOfRightGuesses) / (numberOfRightGuesses + numberOfWrongGuesses);
-            cout << accuracy << endl;
-            
+            testTrain(trainingData, trainResult);
+//            cout << "Testing" << endl;
+            test(allData, res_mat, trainingDataCount);
+//            int numberOfWrongGuesses = 0;
+//            int numberOfRightGuesses = 0;
+//            Ptr<ml::SVM> svm = Algorithm::load<SVM>("/Users/aamirjawaid/Documents/workspace/hand-write-digit-recognition-with-opencv/HOG_SVM_DATA.xml");
+//            for (int i = trainingDataCount; i < allData.rows; i++) {
+//                int result = predict(allData.row(i), svm);
+//                if (result == res_mat.at<int>(i)) {
+//                    numberOfRightGuesses++;
+//                } else {
+//                    numberOfWrongGuesses++;
+//                }
+//            }
+//            
+//            cout << "numberOfRightGuesses";
+//            cout << numberOfRightGuesses << endl;
+//            
+//            cout << "numberOfWrongGuesses";
+//            cout << numberOfWrongGuesses << endl;
+//            
+//            float accuracy = static_cast<float>(numberOfRightGuesses) / (numberOfRightGuesses + numberOfWrongGuesses);
+//            cout << accuracy << endl;
+    
 //            if (accuracy > highestAccuracy) {
 //                highestAccuracy = accuracy;
 //                bestC = Cs[k];
